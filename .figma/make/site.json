@@ -1,0 +1,10 @@
+{
+  "description": "Displays detailed product information with images, pricing, and reviews to help online shoppers make informed purchase decisions easily.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
