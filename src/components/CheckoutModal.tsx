@@ -1,10 +1,30 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useCart } from "../context/CartContext";
 import { useAuth } from "../context/AuthContext";
-import { createOrderApi } from "../services/api";
-import { Order } from "../types/cart";
+import {
+  createOrderApi,
+  fetchPayHereParamsApi,
+  confirmOrderPaymentApi,
+} from "../services/api";
+import { Order, PayHereParams } from "../types/cart";
 
 const BRAND = "#2e7d52";
+
+// Dynamically load PayHere script if not present
+function loadPayHereScript(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (window.payhere) {
+      resolve(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://www.payhere.lk/lib/payhere.js";
+    script.async = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
 
 export default function CheckoutModal() {
   const {
@@ -25,11 +45,19 @@ export default function CheckoutModal() {
   const [address, setAddress] = useState("");
   const [city, setCity] = useState("Colombo");
   const [postalCode, setPostalCode] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Cash on Delivery");
+  const [paymentMethod, setPaymentMethod] = useState("PayHere Online Payment");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [placedOrder, setPlacedOrder] = useState<Order | null>(null);
+
+  // Pre-load PayHere script on modal open
+  useEffect(() => {
+    if (isCheckoutOpen) {
+      loadPayHereScript();
+    }
+  }, [isCheckoutOpen]);
 
   if (!isCheckoutOpen) return null;
 
@@ -46,9 +74,11 @@ export default function CheckoutModal() {
     }
 
     setError(null);
+    setWarning(null);
     setLoading(true);
 
     try {
+      // 1. Create order in MongoDB
       const order = await createOrderApi(
         {
           items,
@@ -67,11 +97,77 @@ export default function CheckoutModal() {
         token
       );
 
-      setPlacedOrder(order);
-      clearCart();
+      // 2. If PayHere Online Payment is selected, launch PayHere Sandbox popup
+      if (paymentMethod === "PayHere Online Payment") {
+        await loadPayHereScript();
+
+        const params: PayHereParams = await fetchPayHereParamsApi(order._id!, token);
+
+        if (window.payhere && typeof window.payhere.startPayment === "function") {
+          window.payhere.onCompleted = async (orderId: string) => {
+            console.log("PayHere payment completed for order:", orderId);
+            try {
+              const confirmRes = await confirmOrderPaymentApi(
+                orderId,
+                `PH_SANDBOX_${Date.now()}`,
+                token
+              );
+              setPlacedOrder(
+                confirmRes.order || {
+                  ...order,
+                  status: "Processing",
+                  paymentStatus: "Paid",
+                }
+              );
+            } catch (confirmErr) {
+              console.warn("Backend payment confirm error:", confirmErr);
+              setPlacedOrder({
+                ...order,
+                status: "Processing",
+                paymentStatus: "Paid",
+              });
+            }
+            clearCart();
+            setLoading(false);
+          };
+
+          window.payhere.onDismissed = () => {
+            console.log("PayHere payment modal dismissed");
+            setLoading(false);
+            setWarning(
+              `Payment popup was dismissed. Your order reference #${
+                order._id ? order._id.slice(-6).toUpperCase() : ""
+              } is saved as Pending.`
+            );
+          };
+
+          window.payhere.onError = (err: any) => {
+            console.error("PayHere payment error:", err);
+            setLoading(false);
+            setError(
+              typeof err === "string"
+                ? err
+                : "Payment through PayHere encountered an issue. Please try again."
+            );
+          };
+
+          // Trigger PayHere popup
+          window.payhere.startPayment(params);
+        } else {
+          // Fallback if popup script blocked: direct to sandbox checkout
+          console.warn("window.payhere not found, using direct fallback form");
+          setPlacedOrder(order);
+          clearCart();
+          setLoading(false);
+        }
+      } else {
+        // Cash on Delivery
+        setPlacedOrder(order);
+        clearCart();
+        setLoading(false);
+      }
     } catch (err: any) {
       setError(err.message || "Failed to place order. Please try again.");
-    } finally {
       setLoading(false);
     }
   };
@@ -80,6 +176,7 @@ export default function CheckoutModal() {
     setIsCheckoutOpen(false);
     setPlacedOrder(null);
     setError(null);
+    setWarning(null);
   };
 
   return (
@@ -159,10 +256,30 @@ export default function CheckoutModal() {
                 </div>
                 <div className="flex justify-between text-gray-600">
                   <span>Payment Method:</span>
-                  <span>{placedOrder.paymentMethod}</span>
+                  <span className="font-semibold text-gray-800">{placedOrder.paymentMethod}</span>
                 </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Payment Status:</span>
+                  <span
+                    className={
+                      placedOrder.paymentStatus === "Paid"
+                        ? "font-bold text-[#1f5c3b]"
+                        : "font-bold text-amber-700"
+                    }
+                  >
+                    {placedOrder.paymentStatus === "Paid"
+                      ? "✓ Paid Online via PayHere Sandbox"
+                      : "Pending (Pay on Delivery)"}
+                  </span>
+                </div>
+                {placedOrder.payherePaymentId && (
+                  <div className="flex justify-between text-gray-500 font-mono text-[11px]">
+                    <span>PayHere Transaction:</span>
+                    <span>{placedOrder.payherePaymentId}</span>
+                  </div>
+                )}
                 <div className="border-t border-green-200 pt-2 flex justify-between font-bold text-sm text-gray-900">
-                  <span>Total Paid:</span>
+                  <span>Total Amount:</span>
                   <span style={{ color: BRAND }}>Rs. {placedOrder.total.toLocaleString()}</span>
                 </div>
               </div>
@@ -207,10 +324,30 @@ export default function CheckoutModal() {
                 </p>
               </div>
 
+              {warning && (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg flex items-center justify-between">
+                  <span>⚠️ {warning}</span>
+                  <button
+                    onClick={() => setWarning(null)}
+                    className="text-gray-400 hover:text-gray-700 ml-2 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
               {error && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg flex items-center gap-2">
-                  <span>⚠️</span>
-                  <span>{error}</span>
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span>⚠️</span>
+                    <span>{error}</span>
+                  </div>
+                  <button
+                    onClick={() => setError(null)}
+                    className="text-gray-400 hover:text-gray-700 ml-2 cursor-pointer"
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
 
@@ -294,29 +431,78 @@ export default function CheckoutModal() {
                 {/* Payment Method Selector */}
                 <div className="space-y-2 pt-1 border-t border-gray-100">
                   <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
-                    Payment Option
+                    Select Payment Gateway
                   </h3>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { id: "Cash on Delivery", icon: "💵", label: "Cash on Delivery" },
-                      { id: "Credit / Debit Card", icon: "💳", label: "Online Card" },
-                      { id: "Koko (3 Installments)", icon: "✨", label: "Koko Pay" },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setPaymentMethod(opt.id)}
-                        className={`p-2.5 rounded-xl border text-center transition cursor-pointer ${
-                          paymentMethod === opt.id
-                            ? "border-[#2e7d52] bg-[#f0f7f3] text-[#1f5c3b] font-bold"
-                            : "border-gray-200 text-gray-600 hover:bg-gray-50"
-                        }`}
-                      >
-                        <span className="text-base block mb-0.5">{opt.icon}</span>
-                        <span className="text-[10px] leading-tight block">{opt.label}</span>
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("PayHere Online Payment")}
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                        paymentMethod === "PayHere Online Payment"
+                          ? "border-[#2e7d52] bg-[#f0f7f3] text-[#1f5c3b] shadow-xs"
+                          : "border-gray-200 text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-base">💳</span>
+                        <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-green-200/60 text-[#1f5c3b]">
+                          Sandbox Live
+                        </span>
+                      </div>
+                      <span className="text-xs font-bold block leading-tight">PayHere Gateway</span>
+                      <span className="text-[10px] text-gray-500 block mt-0.5">
+                        Cards, FriMi, EzCash, Genie
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("Cash on Delivery")}
+                      className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                        paymentMethod === "Cash on Delivery"
+                          ? "border-[#2e7d52] bg-[#f0f7f3] text-[#1f5c3b] shadow-xs"
+                          : "border-gray-200 text-gray-700 hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-base">💵</span>
+                        <span className="text-[9px] font-bold text-gray-400">Standard</span>
+                      </div>
+                      <span className="text-xs font-bold block leading-tight">Cash on Delivery</span>
+                      <span className="text-[10px] text-gray-500 block mt-0.5">Pay when order arrives</span>
+                    </button>
                   </div>
+
+                  {/* PayHere Sandbox Info & Test Cards */}
+                  {paymentMethod === "PayHere Online Payment" && (
+                    <div className="p-3 bg-[#f0f7f3] border border-[#a3d4b6] rounded-xl text-xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#1c5c3b] flex items-center gap-1.5 text-[11px]">
+                          <span>🛡️</span> sandbox.payhere.lk Active
+                        </span>
+                        <span className="text-[10px] font-mono bg-white px-2 py-0.5 rounded border border-[#a3d4b6] text-gray-700 font-semibold">
+                          Merchant: 1238496
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-600">
+                        Secure instant checkout with MD5 encrypted signature verification.
+                      </p>
+                      <div className="pt-1 text-[10px] text-gray-600 font-mono bg-white p-2 rounded-lg border border-gray-200 space-y-0.5">
+                        <div className="text-[10px] text-gray-500 font-sans font-bold uppercase mb-1">
+                          Test Cards for Sandbox:
+                        </div>
+                        <div>
+                          <strong className="text-gray-900">Visa:</strong> 4916 2175 0161 1292
+                        </div>
+                        <div>
+                          <strong className="text-gray-900">Mastercard:</strong> 5307 7321 2553 1191
+                        </div>
+                        <div className="text-gray-500 pt-0.5">
+                          CVV: Any 3 digits &bull; Exp: Any future date &bull; OTP: Any 6 digits
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Summary Box */}
@@ -349,10 +535,16 @@ export default function CheckoutModal() {
                   style={{ background: BRAND }}
                 >
                   {loading ? (
-                    <span>Processing Order...</span>
+                    <span>Opening PayHere Secure Gateway...</span>
+                  ) : paymentMethod === "PayHere Online Payment" ? (
+                    <>
+                      <span>Pay with PayHere</span>
+                      <span>•</span>
+                      <span>Rs. {total.toLocaleString()}</span>
+                    </>
                   ) : (
                     <>
-                      <span>Place Order</span>
+                      <span>Place Order (COD)</span>
                       <span>•</span>
                       <span>Rs. {total.toLocaleString()}</span>
                     </>

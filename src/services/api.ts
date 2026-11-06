@@ -1,4 +1,4 @@
-import { CartItem, Product, ProductFilterParams, Order } from "../types/cart";
+import { CartItem, Product, ProductFilterParams, Order, PayHereParams } from "../types/cart";
 import { User } from "../types/auth";
 
 // Supports both Vite reverse proxy and direct backend connection
@@ -218,6 +218,46 @@ export async function fetchAllOrdersApi(token: string): Promise<Order[]> {
     console.warn("Could not fetch store orders:", err);
     return [];
   }
+}
+
+export async function fetchPayHereParamsApi(
+  orderId: string,
+  token: string
+): Promise<PayHereParams> {
+  const res = await apiFetch(`/orders/${orderId}/payhere-params`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to initialize PayHere gateway");
+  }
+  return data;
+}
+
+export async function confirmOrderPaymentApi(
+  orderId: string,
+  paymentId: string,
+  token: string
+): Promise<{ message: string; order: Order }> {
+  const res = await apiFetch(`/orders/${orderId}/payment-complete`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ paymentId }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to confirm payment with server");
+  }
+  return data;
 }
 
 // ── CART ENDPOINTS ───────────────────────────────────────────────────────────

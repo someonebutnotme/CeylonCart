@@ -17,16 +17,6 @@ export default function AuthModal() {
 
   if (!isAuthModalOpen) return null;
 
-  const handleQuickLogin = async (userEmail: string, userPass: string) => {
-    setError(null);
-    setLoading(true);
-    const result = await login(userEmail, userPass);
-    setLoading(false);
-    if (!result.success) {
-      setError(result.error || "Login failed");
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -115,33 +105,6 @@ export default function AuthModal() {
             </button>
           </div>
 
-          {/* Quick Demo Logins (Only on Login Tab) */}
-          {mode === "login" && (
-            <div className="mb-5 p-3 bg-[#f0f7f3] border border-green-100 rounded-xl space-y-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#1f5c3b] block">
-                ⚡ Quick Demo One-Click Login:
-              </span>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin("admin@ceyloncart.com", "admin123")}
-                  disabled={loading}
-                  className="px-2.5 py-1.5 bg-[#2e7d52] text-white text-[11px] font-bold rounded-lg hover:brightness-110 transition cursor-pointer shadow-2xs text-left truncate"
-                >
-                  👑 Admin Login
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin("john@example.com", "customer123")}
-                  disabled={loading}
-                  className="px-2.5 py-1.5 bg-gray-900 text-white text-[11px] font-bold rounded-lg hover:bg-gray-800 transition cursor-pointer shadow-2xs text-left truncate"
-                >
-                  👤 Customer Login
-                </button>
-              </div>
-            </div>
-          )}
-
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg flex items-center gap-2">
               <span>⚠️</span>
@@ -204,7 +167,7 @@ export default function AuthModal() {
                   >
                     🛍️ Customer
                   </button>
-                  <button
+                  {/* <button
                     type="button"
                     onClick={() => setRole("admin")}
                     className={`py-2 px-3 text-xs font-semibold rounded-lg border text-center transition cursor-pointer ${
@@ -214,7 +177,7 @@ export default function AuthModal() {
                     }`}
                   >
                     👑 Store Admin
-                  </button>
+                  </button> */}
                 </div>
 
                 {role === "admin" && (

@@ -722,7 +722,21 @@ export default function AdminDashboard() {
                           Rs. {ord.total.toLocaleString()}
                         </td>
                         <td className="px-4 py-3 text-[11px] text-gray-600">
-                          {ord.paymentMethod}
+                          <span className="font-semibold block text-gray-800">{ord.paymentMethod}</span>
+                          {ord.paymentStatus === "Paid" ? (
+                            <span className="inline-block mt-0.5 px-2 py-0.5 rounded-full bg-green-100 text-green-800 font-bold text-[9px]">
+                              ✓ Paid Online
+                            </span>
+                          ) : (
+                            <span className="inline-block mt-0.5 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-bold text-[9px]">
+                              Pending
+                            </span>
+                          )}
+                          {ord.payherePaymentId && (
+                            <span className="block text-[9px] text-gray-400 font-mono mt-0.5 truncate max-w-[120px]">
+                              ID: {ord.payherePaymentId}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold text-[10px]">

@@ -31,12 +31,21 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: "Cash on Delivery",
     },
+    paymentStatus: {
+      type: String,
+      enum: ["Pending", "Paid", "Failed", "Cancelled"],
+      default: "Pending",
+    },
+    payherePaymentId: {
+      type: String,
+      default: "",
+    },
     subtotal: { type: Number, required: true },
     shipping: { type: Number, default: 0 },
     total: { type: Number, required: true },
     status: {
       type: String,
-      enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],
+      enum: ["Pending", "Processing", "Shipped", "Delivered", "Cancelled", "Paid"],
       default: "Pending",
     },
   },
